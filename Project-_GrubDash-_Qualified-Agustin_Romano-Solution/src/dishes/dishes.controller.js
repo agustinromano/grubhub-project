@@ -1,82 +1,160 @@
 const path = require("path");
-// Use the existing dishes data
+
+// Using the existing dishes data
 const dishes = require(path.resolve("src/data/dishes-data"));
 
-// Use this function to assign ID's when necessary
+// Using this function to assign ID's when necessary
 const nextId = require("../utils/nextId");
 
-// TODO: Implement the /dishes handlers needed to make the tests pass
-function doesDishExist(req, res, next) {
-    const { dishId } = req.params
-    const foundDish = dishes.find((dish) => {
-        return dish.id === dishId
-        }
-    )
-    if (foundDish) {
-        res.locals.dish = foundDish
-        return next()
+// Validation Functions for Create and Update functions:
+function bodyHasNameProperty(req, res, next) {
+  const { data = {} } = req.body;
+
+  if (!data.name) {
+    next({
+      status: 400,
+      message: "Dish must include a name.",
+    });
+  }
+  // Passing the reqest body data to the next middleware/handler functions using "response.locals"
+  res.locals.reqBody = data;
+  return next();
+}
+
+function bodyHasDescriptionProperty(req, res, next) {
+  const reqBody = res.locals.reqBody;
+
+  if (!reqBody.description) {
+    next({
+      status: 400,
+      message: "Dish must include a description.",
+    });
+  }
+
+  return next();
+}
+
+function bodyHasPriceProperty(req, res, next) {
+  const reqBody = res.locals.reqBody;
+
+  if (
+    !reqBody.price ||
+    reqBody.price < 0 ||
+    typeof reqBody.price !== "number"
+  ) {
+    next({
+      status: 400,
+      message:
+        "Dish must include a price and it must be an integer greater than 0.",
+    });
+  }
+
+  return next();
+}
+
+function bodyHasImageUrlProperty(req, res, next) {
+  const reqBody = res.locals.reqBody;
+
+  if (!reqBody["image_url"]) {
+    next({
+      status: 400,
+      message: "Dish must include a image_url",
+    });
+  }
+
+  return next();
+}
+
+// Validation Function for Read and Update functions:
+function dishExists(req, res, next) {
+  const { dishId } = req.params;
+  const foundDish = dishes.find((dish) => dish.id === dishId);
+
+  if (foundDish) {
+    res.locals.dish = foundDish;
+    res.locals.dishId = dishId;
+    return next();
+  }
+
+  next({
+    status: 404,
+    message: `Dish does not exist: ${dishId}.`,
+  });
+}
+
+// Validation Function for the Update function:
+function bodyIdMatchesRouteId(req, res, next) {
+  const dishId = res.locals.dishId;
+  const reqBody = res.locals.reqBody;
+
+  if (reqBody.id) {
+    if (reqBody.id === dishId) {
+      return next();
     }
-    next({ status: 404, message: `Dish does not exist: ${dishId}` })
+
+    next({
+      status: 400,
+      message: `Dish id does not match route id. Dish: ${reqBody.id}, Route: ${dishId}`,
+    });
+  }
+
+  return next();
 }
 
-function validate(req, res, next) {
-    const { data: { name, description, price, image_url } = {} } = req.body
-    if (name && description && price && price > 0 && typeof price === 'number' && image_url) {
-        return next()
-    } else {
-        const messageType = 
-            !name ? 'name' : 
-                !description ? 'description' : 
-                    !price || price <= 0 || typeof price !== 'number' ? 'price' : 
-                        'image_url'
-        next({ status: 400, message: `Dish must include ${messageType}` })
+// Route Handlers:
+function update(req, res) {
+  const dish = res.locals.dish;
+  const reqBody = res.locals.reqBody;
+
+  // Creating array of property names
+  const existingDishProperties = Object.getOwnPropertyNames(dish);
+
+  for (let i = 0; i < existingDishProperties.length; i++) {
+    // Accessing each dish object key within the array
+    let propName = existingDishProperties[i];
+    // Updating each value if there is a difference between the existing dish and the req body dish
+    if (dish[propName] !== reqBody[propName]) {
+      dish[propName] = reqBody[propName];
     }
+  }
+  res.json({ data: dish });
 }
 
-function create(req, res, next) {
-    const { data: { name, description, price, image_url } = {} } = req.body
-    const newId = nextId()
-    const newDish = {
-        id: newId,
-        name,
-        description,
-        price,
-        image_url
-    }
-    dishes.push(newDish)
-    res.status(201).json({ data: newDish })
+function create(req, res) {
+  const reqBody = res.locals.reqBody;
+  const newDish = {
+    ...reqBody,
+    id: nextId(),
+  };
+  dishes.push(newDish);
+  res.status(201).json({ data: newDish });
 }
 
-function read(req, res, next) {
-    const dish = res.locals.dish
-    res.json({ data: dish })
+function read(req, res) {
+  res.json({ data: res.locals.dish });
 }
 
-function update(req, res, next) {
-    let dish = res.locals.dish
-    const originalDishId = dish.id
-    const { data: { id, name, description, price, image_url } = {} } = req.body
-    if (originalDishId === id || !id) {
-        const updatedDish = {
-            id: dish.id,
-            name,
-            description,
-            price,
-            image_url
-        }
-        dish = updatedDish
-        res.json({ data: dish })
-    }
-    next({ status: 400, message: `Dish id does not match route id. Dish: ${id}, Route: ${originalDishId}` })
-}
-
-function list(req, res, next) {
-    res.json({ data: dishes})
+function list(req, res) {
+  res.json({ data: dishes });
 }
 
 module.exports = {
-    create: [validate, create],
-    read: [doesDishExist, read],
-    update: [doesDishExist, validate, update],
-    list
-}
+  create: [
+    bodyHasNameProperty,
+    bodyHasDescriptionProperty,
+    bodyHasPriceProperty,
+    bodyHasImageUrlProperty,
+    create,
+  ],
+  read: [dishExists, read],
+  update: [
+    dishExists,
+    bodyHasNameProperty,
+    bodyHasDescriptionProperty,
+    bodyHasPriceProperty,
+    bodyHasImageUrlProperty,
+    bodyIdMatchesRouteId,
+    update,
+  ],
+  list,
+};
